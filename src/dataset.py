@@ -15,7 +15,7 @@ class Tokenizer:
 
     @staticmethod
     def _drop_long_seq(dataset, max_len):
-        return [s for s in dataset if len(s)<=len]
+        return [s for s in dataset if len(s)<=max_len]
 
     def apply_merges(self, sentence: str) -> list:
         sentence = list(sentence)
@@ -43,30 +43,114 @@ class Tokenizer:
     def decode(self, encoded_sent: list) -> list:
         sent = []
         for tok in encoded_sent:
-            sent.append(self.decoder.get(tok))
+            sent.append(self.decoder.get(tok, '<unk>'))
         return sent
 
-    
+    def train(self, dataset: list, num_merges: int):
+        # assumes that every element of the dataset ends with \n
+        dataset = ''.join(dataset)
+        vocab = set(dataset)
+        if '\n' in vocab:
+            vocab.remove('\n')
+        pairs = list(zip(dataset[:-1],dataset[1:]))
+        pair_counter = Counter(pairs)
+        next_idx = []
+        prev_idx = []
+        pair_positions = {k: set() for k in pair_counter}
+        for i, pair in enumerate(pairs):
+            pair_positions[pair].add(i)
 
-    def train(self, dataset: list, num_merges: int, max_seq_len: int):
-        vocab = set()
-        dataset = self._drop_long_seq(dataset, max_seq_len)
         for i in range(len(dataset)):
-            dataset[i] = list(dataset[i])
-            vocab.update(dataset[i])
+
+            if dataset[i] != '\n' and i>0 and dataset[i-1] != '\n':
+                prev_idx.append(i-1)
+            else:
+                prev_idx.append(-1)
+
+            if dataset[i] != '\n' and i<len(dataset)-1 and dataset[i+1] != '\n':
+                next_idx.append(i+1)
+            else:
+                next_idx.append(-1)
+
+        for a,b in list(pair_positions.keys()):
+            if a == '\n' or b == '\n':
+                pair_positions.pop((a,b))
+                pair_counter.pop((a,b))
 
         for i in range(num_merges):
-            pair_counter = Counter()
-            for sent in dataset:
-                pair_counter.update(zip(sent[:-1],sent[1:]))
-
+            # find max freq pair
+            if not len(pair_counter):
+                break
             best_pair = max(pair_counter, key=pair_counter.get)
             self.merge.append(best_pair)
+            # count = pair_counter.pop(best_pair)
+            a, b = best_pair
+            tok = a+b
+            vocab.add(a+b)
 
-        pass
+            # update position info and find positions of adjacent pairs
+            positions = pair_positions.get(best_pair)
+            lnew = set()
+            consumed = set()
+            for pos in sorted(positions):
+                if pos in consumed:
+                    continue
+                lnew.add(prev_idx[pos])
+                consumed.add(next_idx[pos])
+                next_idx[pos] = next_idx[next_idx[pos]]
+                prev_idx[next_idx[pos]] = pos if next_idx[pos]>-1 else prev_idx[next_idx[pos]]
+
+            for pair in list(pair_positions.keys()):
+                #right pairs
+                cons_intersect = pair_positions[pair].intersection(consumed)
+                pair_positions[pair] -= consumed
+                pair_counter[pair] -= len(cons_intersect)
+                for pos in sorted(cons_intersect):
+                    left_idx = prev_idx[pos]
+                    right_idx = next_idx[left_idx]
+                    if right_idx in positions-consumed:
+                        new_pair = (tok,tok)
+                    else:
+                        new_pair = (tok,pair[1])
+
+                    pair_counter[new_pair] += 1
+                    pair_positions[new_pair] = pair_positions.get(new_pair, set()) | {left_idx}
+
+                #left pairs
+                if pair == best_pair:
+                    continue
+                left_intersect = pair_positions[pair].intersection(lnew)
+                pair_positions[pair] -= lnew
+                pair_counter[pair] -= len(left_intersect)
+                new_pair = (pair[0],tok)
+                pair_positions[new_pair] = pair_positions.get(new_pair, set()) | left_intersect
+                pair_counter[new_pair] = len(pair_positions[new_pair])
+
+            pair_positions.pop(best_pair)
+            pair_counter.pop(best_pair)
+
+            for pair in list(pair_positions.keys()):
+                if pair_counter[pair]<=0:
+                    pair_counter.pop(pair)
+                    pair_positions.pop(pair)
+
+        buffer = max(self.encoder.values())+1
+        for i, tok in enumerate(vocab):
+            self.encoder[tok] = i+buffer
+
+        for key, value in self.encoder.items():
+            self.decoder[value] = key
 
     def save(self, path):
         pass
 
     def load(self, path):
         pass
+
+tok = Tokenizer()
+
+tok.train(list('abcabc\nabcabc\n'),5)
+
+print(tok.merge)
+print(tok.encoder)
+print(tok.decoder)
