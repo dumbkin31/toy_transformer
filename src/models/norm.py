@@ -17,3 +17,10 @@ class LayerNorm(nn.Module):
         x_normalized = (x - mean) / torch.sqrt(variance + self.eps)
 
         return self.gamma * x_normalized + self.beta
+
+class RMSNorm(nn.Module):
+    def __init__(self):
+        pass
+    
+    def forward(self):
+        pass

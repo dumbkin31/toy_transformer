@@ -1,9 +1,17 @@
-from collections import Counter
+import json
+import argparse
+import heapq
+
+from pathlib import Path
+from collections import defaultdict
 
 PAD = 0
 UNK = 1
 BOS = 2
 EOS = 3
+
+OUT_DIR = "../tokenizer/"
+IN_DIR = "../Dataset_A1/"
 
 class Tokenizer:
     def __init__(self):
@@ -18,139 +26,247 @@ class Tokenizer:
         return [s for s in dataset if len(s)<=max_len]
 
     def apply_merges(self, sentence: str) -> list:
-        sentence = list(sentence)
-        for a, b in self.merge:
-            pairs = list(zip(sentence[:-1],sentence[1:]))
-            merge_idx = []
-            for i, pair in enumerate(pairs):
-                if pair == (a,b):
-                    merge_idx.append(i)
+        """Apply learned merge rules to tokenize a sentence.
 
-            tok = a+b
-            for i in reversed(merge_idx):
-                if sentence[i]!=a or sentence[i+1]!=b:
-                    continue
-                sentence.pop(i+1)
-                sentence[i] = tok
-        return sentence
+        Rebuilds the token list each pass instead of using list.pop(),
+        avoiding O(N) shifts per pop.
+        """
+        tokens = list(sentence)
+        for a, b in self.merge:
+            new_tokens = []
+            i = 0
+            while i < len(tokens):
+                if i < len(tokens) - 1 and tokens[i] == a and tokens[i + 1] == b:
+                    new_tokens.append(a + b)
+                    i += 2
+                else:
+                    new_tokens.append(tokens[i])
+                    i += 1
+            tokens = new_tokens
+        return tokens
 
     def encode(self, sentence: list) -> list:
-        encoded_sent = []
-        for tok in sentence:
-            encoded_sent.append(self.encoder.get(tok,self.encoder['<unk>']))
-        return encoded_sent
+        return [self.encoder.get(tok, self.encoder['<unk>']) for tok in sentence]
 
     def decode(self, encoded_sent: list) -> list:
-        sent = []
-        for tok in encoded_sent:
-            sent.append(self.decoder.get(tok, '<unk>'))
-        return sent
+        return [self.decoder.get(tok, '<unk>') for tok in encoded_sent]
 
     def train(self, dataset: list, num_merges: int):
-        # assumes that every element of the dataset ends with \n
-        dataset = ''.join(dataset)
-        vocab = set(dataset)
-        if '\n' in vocab:
-            vocab.remove('\n')
-        pairs = list(zip(dataset[:-1],dataset[1:]))
-        pair_counter = Counter(pairs)
-        next_idx = []
-        prev_idx = []
-        pair_positions = {k: set() for k in pair_counter}
-        for i, pair in enumerate(pairs):
-            pair_positions[pair].add(i)
+        """Train BPE tokenizer.
 
-        for i in range(len(dataset)):
+        Uses per-line doubly-linked lists to avoid joining into one
+        giant string. Global pair counts aggregate across all lines.
+        Each merge only touches positions of the affected pair — no
+        full-vocabulary scan. A max-heap provides O(log K) best-pair
+        lookup with lazy deletion.
+        """
+        print("Initialising...", flush=True)
 
-            if dataset[i] != '\n' and i>0 and dataset[i-1] != '\n':
-                prev_idx.append(i-1)
-            else:
-                prev_idx.append(-1)
+        # ---- Build per-line data structures ----
+        # Each line gets its own tokens list + linked list arrays.
+        # We track (line_idx, position) tuples in pair_positions.
 
-            if dataset[i] != '\n' and i<len(dataset)-1 and dataset[i+1] != '\n':
-                next_idx.append(i+1)
-            else:
-                next_idx.append(-1)
+        num_lines = len(dataset)
 
-        for a,b in list(pair_positions.keys()):
-            if a == '\n' or b == '\n':
-                pair_positions.pop((a,b))
-                pair_counter.pop((a,b))
+        # Per-line storage
+        all_tokens = []     # all_tokens[line_idx] = list of current tokens
+        all_next = []       # all_next[line_idx] = list of next-pointers
+        all_prev = []       # all_prev[line_idx] = list of prev-pointers
 
-        for i in range(num_merges):
-            # find max freq pair
-            if not len(pair_counter):
+        # Global pair tracking
+        # pair -> set of (line_idx, pos) tuples
+        pair_pos_lists = defaultdict(list)
+
+        vocab = set()
+
+        for li, line in enumerate(dataset):
+            # Strip trailing newline for content
+            content = line.rstrip('\n')
+            clen = len(content)
+            if clen == 0:
+                all_tokens.append([])
+                all_next.append([])
+                all_prev.append([])
+                continue
+
+            tokens = list(content)
+            all_tokens.append(tokens)
+
+            # Build linked list for this line
+            nxt = list(range(1, clen)) + [-1]  # next[i] = i+1, last = -1
+            prv = [-1] + list(range(0, clen - 1))  # prev[i] = i-1, first = -1
+            all_next.append(nxt)
+            all_prev.append(prv)
+
+            # Collect vocab
+            for c in content:
+                vocab.add(c)
+
+            # Collect pair positions
+            for j in range(clen - 1):
+                pair_pos_lists[(content[j], content[j + 1])].append((li, j))
+
+        # Convert to sets and count
+        pair_positions = {}
+        pair_count = {}
+        for pair, pos_list in pair_pos_lists.items():
+            pair_positions[pair] = set(pos_list)
+            pair_count[pair] = len(pos_list)
+        del pair_pos_lists
+
+        # Max-heap (negated counts, lazy deletion)
+        heap = [(-c, p) for p, c in pair_count.items()]
+        heapq.heapify(heap)
+
+        print(f"Init done. {num_lines} lines, "
+              f"unique pairs={len(pair_count)}.  "
+              f"Starting {num_merges} merges...", flush=True)
+
+        # ---- Merge loop ----
+        _heappush = heapq.heappush  # local ref for speed
+
+        for merge_i in range(num_merges):
+            if (merge_i + 1) % 1 == 0:
+                print(f"  merge {merge_i + 1}/{num_merges}", flush=True)
+
+            # Find best pair via heap with lazy deletion
+            best_pair = None
+            while heap:
+                neg_count, candidate = heapq.heappop(heap)
+                if candidate in pair_count and pair_count[candidate] == -neg_count:
+                    best_pair = candidate
+                    break
+            if best_pair is None:
                 break
-            best_pair = max(pair_counter, key=pair_counter.get)
-            self.merge.append(best_pair)
-            # count = pair_counter.pop(best_pair)
+
             a, b = best_pair
-            tok = a+b
-            vocab.add(a+b)
+            new_tok = a + b
+            vocab.add(new_tok)
+            self.merge.append(best_pair)
 
-            # update position info and find positions of adjacent pairs
-            positions = pair_positions.get(best_pair)
-            lnew = set()
-            consumed = set()
-            for pos in sorted(positions):
-                if pos in consumed:
+            # Pop positions of the best pair
+            positions = pair_positions.pop(best_pair)
+            del pair_count[best_pair]
+
+            for li, pos in positions:
+                toks = all_tokens[li]
+                nxt = all_next[li]
+                prv = all_prev[li]
+
+                right = nxt[pos]
+
+                # Validate — may have been invalidated by an earlier
+                # position in this same merge batch
+                if right == -1 or toks[pos] != a or toks[right] != b:
                     continue
-                lnew.add(prev_idx[pos])
-                consumed.add(next_idx[pos])
-                next_idx[pos] = next_idx[next_idx[pos]]
-                prev_idx[next_idx[pos]] = pos if next_idx[pos]>-1 else prev_idx[next_idx[pos]]
 
-            for pair in list(pair_positions.keys()):
-                #right pairs
-                cons_intersect = pair_positions[pair].intersection(consumed)
-                pair_positions[pair] -= consumed
-                pair_counter[pair] -= len(cons_intersect)
-                for pos in sorted(cons_intersect):
-                    left_idx = prev_idx[pos]
-                    right_idx = next_idx[left_idx]
-                    if right_idx in positions-consumed:
-                        new_pair = (tok,tok)
-                    else:
-                        new_pair = (tok,pair[1])
+                left = prv[pos]
+                right_right = nxt[right]
 
-                    pair_counter[new_pair] += 1
-                    pair_positions[new_pair] = pair_positions.get(new_pair, set()) | {left_idx}
+                # Remove old left pair: (toks[left], a) at (li, left)
+                if left != -1:
+                    old_lp = (toks[left], a)
+                    if old_lp in pair_positions:
+                        key = (li, left)
+                        pp = pair_positions[old_lp]
+                        if key in pp:
+                            pp.discard(key)
+                            pair_count[old_lp] -= 1
+                            if pair_count[old_lp] <= 0:
+                                del pair_count[old_lp]
+                                del pair_positions[old_lp]
 
-                #left pairs
-                if pair == best_pair:
-                    continue
-                left_intersect = pair_positions[pair].intersection(lnew)
-                pair_positions[pair] -= lnew
-                pair_counter[pair] -= len(left_intersect)
-                new_pair = (pair[0],tok)
-                pair_positions[new_pair] = pair_positions.get(new_pair, set()) | left_intersect
-                pair_counter[new_pair] = len(pair_positions[new_pair])
+                # Remove old right pair: (b, toks[right_right]) at (li, right)
+                if right_right != -1:
+                    old_rp = (b, toks[right_right])
+                    if old_rp in pair_positions:
+                        key = (li, right)
+                        pp = pair_positions[old_rp]
+                        if key in pp:
+                            pp.discard(key)
+                            pair_count[old_rp] -= 1
+                            if pair_count[old_rp] <= 0:
+                                del pair_count[old_rp]
+                                del pair_positions[old_rp]
 
-            pair_positions.pop(best_pair)
-            pair_counter.pop(best_pair)
+                # Perform the merge
+                toks[pos] = new_tok
+                toks[right] = None  # consumed
 
-            for pair in list(pair_positions.keys()):
-                if pair_counter[pair]<=0:
-                    pair_counter.pop(pair)
-                    pair_positions.pop(pair)
+                # Update linked list
+                nxt[pos] = right_right
+                if right_right != -1:
+                    prv[right_right] = pos
 
-        buffer = max(self.encoder.values())+1
-        for i, tok in enumerate(vocab):
-            self.encoder[tok] = i+buffer
+                # Add new left pair
+                if left != -1:
+                    new_lp = (toks[left], new_tok)
+                    key = (li, left)
+                    if new_lp not in pair_positions:
+                        pair_positions[new_lp] = set()
+                        pair_count[new_lp] = 0
+                    pair_positions[new_lp].add(key)
+                    pair_count[new_lp] += 1
+                    _heappush(heap, (-pair_count[new_lp], new_lp))
+
+                # Add new right pair
+                if right_right != -1:
+                    new_rp = (new_tok, toks[right_right])
+                    key = (li, pos)
+                    if new_rp not in pair_positions:
+                        pair_positions[new_rp] = set()
+                        pair_count[new_rp] = 0
+                    pair_positions[new_rp].add(key)
+                    pair_count[new_rp] += 1
+                    _heappush(heap, (-pair_count[new_rp], new_rp))
+
+        # Build encoder from vocab
+        buffer = max(self.encoder.values()) + 1
+        for i, tok in enumerate(sorted(vocab, key=lambda x: len(x))):
+            self.encoder[tok] = i + buffer
 
         for key, value in self.encoder.items():
             self.decoder[value] = key
 
+        print("Training complete.", flush=True)
+
     def save(self, path):
-        pass
+        data = {
+            "encoder" : self.encoder,
+            "merge" : self.merge
+        }
+        with open(path,"w") as victory:
+            json.dump(data,victory,indent=4)
 
     def load(self, path):
-        pass
+        with open(path,"r") as victory:
+            data = json.load(victory)
+        self.encoder = data["encoder"]
+        self.merge = [tuple(pair) for pair in data["merge"]]
+        self.decoder = {v:k for k,v in self.encoder.items()}
 
-tok = Tokenizer()
+if __name__ == "__main__":
 
-tok.train(list('abcabc\nabcabc\n'),5)
+    parser = argparse.ArgumentParser()
 
-print(tok.merge)
-print(tok.encoder)
-print(tok.decoder)
+    parser.add_argument("--merges", type=int, required=True)
+    parser.add_argument("--dataset", required=True)
+
+    args = parser.parse_args()
+
+    num_merges = args.merges
+    dataset = args.dataset
+
+    datapath = IN_DIR+dataset
+    outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+'.json'
+
+    with open(datapath,"r") as file:
+        data = file.readlines()
+
+    tokenizer = Tokenizer()
+
+    if Path(outpath).exists():
+        tokenizer.load(outpath)
+    else:
+        tokenizer.train(data, num_merges)
+        tokenizer.save(outpath)
