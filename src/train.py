@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader, random_split
 
 import wandb
 import pickle
+import argparse
 
 from pathlib import Path
 from transformer import Transformer, TransformerConfig
@@ -182,6 +183,20 @@ def train(
     run.finish()
 
 if __name__=="__main__":
+    parser = argparse.ArgumentParser()
+    
+    parser.add_argument("--d_model", type=int)
+    parser.add_argument("--d_ff", type=int)
+    parser.add_argument("--num_heads", type=int)
+    parser.add_argument("--num_layers", type=int)
+    parser.add_argument("--rope", type=bool)
+    parser.add_argument("--attention", type=str)
+    parser.add_argument("--normalization", type=str)
+    parser.add_argument("--epochs", type=int)
+
+    args = parser.parse_args()
+
+
     with open(SRC_PATH, "rb") as srcfile:
         src_data = pickle.load(srcfile)
 
@@ -232,14 +247,14 @@ if __name__=="__main__":
     pl_tok.load(PLAIN_TOKENIZER)
 
     config = TransformerConfig(
-        d_model=128,
-        d_ff=512,
+        d_model=args.d_model,
+        d_ff=args.d_ff,
         max_seq_len=3000,
-        num_heads=4,
-        num_layers=2,
-        rope=False,
-        attention="mha",
-        normalization="layernorm",
+        num_heads=args.num_heads,
+        num_layers=args.num_layers,
+        rope=args.rope,
+        attention=args.attention,
+        normalization=args.normalization,
         dropout=0.1,
         src_vocab_size=len(ci_tok.encoder),
         tgt_vocab_size=len(pl_tok.encoder)
@@ -251,7 +266,16 @@ if __name__=="__main__":
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        num_epochs=1,
+        num_epochs=args.epochs,
         learning_rate=1e-4,
         device=device
     )
+
+    # total_params = sum(p.numel() for p in model.parameters())
+    # trainable_params = sum(
+    #     p.numel() for p in model.parameters()
+    #     if p.requires_grad
+    # )
+
+    # print(f"Total parameters: {total_params:,}")
+    # print(f"Trainable parameters: {trainable_params:,}")

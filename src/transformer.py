@@ -9,15 +9,15 @@ from models.positional import PositionalEncoding
 class TransformerConfig:
     def __init__(
             self, 
-            d_model, 
-            d_ff, 
-            max_seq_len, 
-            num_heads, 
-            num_layers,
-            rope, 
-            attention, 
-            normalization,
-            dropout,
+            d_model=128, 
+            d_ff=512, 
+            max_seq_len=3000, 
+            num_heads=4, 
+            num_layers=2,
+            rope=False, 
+            attention="mha", 
+            normalization="layernorm",
+            dropout=0.1,
             src_vocab_size=2000,
             tgt_vocab_size=5000
         ):
