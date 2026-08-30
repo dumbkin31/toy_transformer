@@ -64,8 +64,8 @@ if __name__=="__main__":
     # DATA_DIR = "../Dataset_A1/"
     # plot_lengths(DATA_DIR+"brown_cipher.txt", DATA_DIR+"brown_plain.txt")
 
-    TOK_DIR = "../tokenizer/"
-    calc_tok_lengths(TOK_DIR+"brown_cipher2000_bits8.json",TOK_DIR+"brown_plain5000_whitespace.json")
+    # TOK_DIR = "../tokenizer/"
+    # calc_tok_lengths(TOK_DIR+"brown_cipher2000_bits8.json",TOK_DIR+"brown_plain5000_whitespace.json")
 
     # with open("../brown_plain_tokenized.pkl","rb") as file:
     #     data = pickle.load(file)
@@ -74,4 +74,10 @@ if __name__=="__main__":
     # tok.load(TOK_DIR+"brown_plain5000_whitespace.json")
     # for sentence in data[:3]:
     #     print(tok.decode(sentence))
+
+    with open("../brown_cipher_tokenized.pkl","rb") as file:
+        data = pickle.load(file)
+
+    data = sorted(data, key=lambda x: -len(x))
+    print(len(data[1]))
 

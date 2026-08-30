@@ -251,7 +251,7 @@ if __name__=="__main__":
     config = TransformerConfig(
         d_model=args.d_model,
         d_ff=args.d_ff,
-        max_seq_len=300,
+        max_seq_len=350,
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         rope=args.rope,
