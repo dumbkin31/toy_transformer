@@ -13,7 +13,7 @@ class ScaledDotProductAttention(nn.Module):
         attn_scores = torch.matmul(Q, K.transpose(-2, -1))/math.sqrt(d_k)
 
         if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float('-inf'))
+            attn_scores = attn_scores.masked_fill(mask == 0, torch.finfo(attn_scores.dtype).min)
 
         attn_probs = torch.softmax(attn_scores, dim=-1)
 
@@ -82,8 +82,35 @@ class MultiHeadAttention(nn.Module):
 
 
 class GroupedQueryAttention(nn.Module):
-    def __init__(self):
-        pass
+    def __init__(self, d_model, num_heads, num_kv_heads):
+        super().__init__()
+
+        assert d_model % num_heads == 0
+        assert num_heads % num_kv_heads == 0
+
+        self.d_model = d_model
+        self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads
+
+        self.d_k = d_model // num_heads
+        self.num_groups = num_heads // num_kv_heads
+
+        self.W_q = nn.Linear(d_model, d_model)
+
+        # K and V only need num_kv_heads
+        self.W_k = nn.Linear(
+            d_model,
+            num_kv_heads * self.d_k
+        )
+
+        self.W_v = nn.Linear(
+            d_model,
+            num_kv_heads * self.d_k
+        )
+
+        self.W_o = nn.Linear(d_model, d_model)
+
+        self.scaled_dot_product_attention = ScaledDotProductAttention()
 
     def forward(self):
         pass

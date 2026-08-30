@@ -40,48 +40,36 @@ def save_checkpoint(
     torch.save(checkpoint, path)
     print(f"Checkpoint saved to {path}")
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device):
+def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler, amp_enabled, amp_dtype):
     model.train()
 
     total_loss = 0.0
 
     for src, tgt in dataloader:
-        src = src.to(device)
-        tgt = tgt.to(device)
-
-        # Decoder input:
-        # [BOS, token1, token2, ..., tokenN]
         tgt_input = tgt[:, :-1]
-
-        # What the model should predict:
-        # [token1, token2, ..., tokenN, EOS]
         tgt_labels = tgt[:, 1:]
 
-        # Forward pass
-        output = model(src, tgt_input)
-
-        # output:
-        # (batch_size, target_length, vocab_size)
-        #
-        # tgt_labels:
-        # (batch_size, target_length)
-
-        loss = criterion(
-            output.reshape(-1, output.size(-1)),
-            tgt_labels.reshape(-1)
-        )
-
-        # Backpropagation
         optimizer.zero_grad()
-        loss.backward()
 
-        optimizer.step()
+        with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
+            output = model(src.to(device), tgt_input.to(device))
+            loss = criterion(
+                output.reshape(-1, output.size(-1)),
+                tgt_labels.to(device).reshape(-1)
+            )
+
+
+        scaler.scale(loss).backward()
+        scaler.unscale_(optimizer)                     # needed before clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        scaler.step(optimizer)
+        scaler.update()
 
         total_loss += loss.item()
 
     return total_loss / len(dataloader)
 
-def evaluate_loss(model, dataloader, criterion, device):
+def evaluate_loss(model, dataloader, criterion, device, amp_enabled, amp_dtype):
     model.eval()
 
     total_loss = 0.0
@@ -94,12 +82,12 @@ def evaluate_loss(model, dataloader, criterion, device):
             tgt_input = tgt[:, :-1]
             tgt_labels = tgt[:, 1:]
 
-            output = model(src, tgt_input)
-
-            loss = criterion(
-                output.reshape(-1, output.size(-1)),
-                tgt_labels.reshape(-1)
-            )
+            with torch.autocast(device_type=device.type, dtype=amp_dtype, enabled=amp_enabled):
+                output = model(src.to(device), tgt_input.to(device))
+                loss = criterion(
+                    output.reshape(-1, output.size(-1)),
+                    tgt_labels.to(device).reshape(-1)
+                )
 
             total_loss += loss.item()
 
@@ -138,6 +126,14 @@ def train(
         },
     )
 
+    amp_enabled = device.type == "cuda"
+    amp_dtype = (
+        torch.bfloat16
+        if amp_enabled and torch.cuda.is_bf16_supported()
+        else torch.float16
+    )
+    scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled and amp_dtype == torch.float16)
+
     best_val_loss = float("inf")
 
     for epoch in range(num_epochs):
@@ -147,14 +143,19 @@ def train(
             train_loader,
             optimizer,
             criterion,
-            device
+            device,
+            scaler,
+            amp_enabled,
+            amp_dtype
         )
 
         val_loss = evaluate_loss(
             model,
             val_loader,
             criterion,
-            device
+            device,
+            amp_enabled,
+            amp_dtype
         )
 
         print(
@@ -185,14 +186,15 @@ def train(
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
     
-    parser.add_argument("--d_model", type=int)
-    parser.add_argument("--d_ff", type=int)
-    parser.add_argument("--num_heads", type=int)
-    parser.add_argument("--num_layers", type=int)
-    parser.add_argument("--rope", type=bool)
-    parser.add_argument("--attention", type=str)
-    parser.add_argument("--normalization", type=str)
-    parser.add_argument("--epochs", type=int)
+    parser.add_argument("--d_model", type=int, required=True)
+    parser.add_argument("--d_ff", type=int, required=True)
+    parser.add_argument("--num_heads", type=int, required=True)
+    parser.add_argument("--num_layers", type=int, required=True)
+    parser.add_argument("--rope", type=bool, required=True)
+    parser.add_argument("--attention", type=str, required=True)
+    parser.add_argument("--normalization", type=str, required=True)
+    parser.add_argument("--epochs", type=int, required=True)
+    parser.add_argument("--batch_size", type=int, required=True)
 
     args = parser.parse_args()
 
@@ -217,21 +219,21 @@ if __name__=="__main__":
     
     train_loader = DataLoader(
         train_dataset,
-        batch_size=32,
+        batch_size=args.batch_size,
         shuffle=True,
         collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=32,
+        batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn
     )
 
     test_loader = DataLoader(
         test_dataset,
-        batch_size=32,
+        batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn
     )
@@ -271,11 +273,11 @@ if __name__=="__main__":
         device=device
     )
 
-    # total_params = sum(p.numel() for p in model.parameters())
-    # trainable_params = sum(
-    #     p.numel() for p in model.parameters()
-    #     if p.requires_grad
-    # )
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(
+        p.numel() for p in model.parameters()
+        if p.requires_grad
+    )
 
-    # print(f"Total parameters: {total_params:,}")
-    # print(f"Trainable parameters: {trainable_params:,}")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
