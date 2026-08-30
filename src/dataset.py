@@ -1,6 +1,8 @@
 import json
 import argparse
 import heapq
+import pickle
+from torch.utils.data import Dataset, DataLoader
 
 from pathlib import Path
 from collections import defaultdict
@@ -25,13 +27,12 @@ class Tokenizer:
     def _drop_long_seq(dataset, max_len):
         return [s for s in dataset if len(s)<=max_len]
 
-    def apply_merges(self, sentence: str) -> list:
-        """Apply learned merge rules to tokenize a sentence.
-
-        Rebuilds the token list each pass instead of using list.pop(),
-        avoiding O(N) shifts per pop.
+    def _apply_merges_to_tokens(self, tokens: list) -> list:
+        """Run the learned merge rules over a single token list.
+    
+        Extracted so it can be applied per-segment (e.g. per word for
+        whitespace pretokenization) without cross-segment merges.
         """
-        tokens = list(sentence)
         for a, b in self.merge:
             new_tokens = []
             i = 0
@@ -44,6 +45,34 @@ class Tokenizer:
                     i += 1
             tokens = new_tokens
         return tokens
+    
+    def apply_merges(self, sentence: str, pretokenize: str = "char") -> list:
+        """Apply learned merge rules to tokenize a sentence.
+    
+        pretokenize must match whatever mode was used in train():
+            "char"       - default; merges applied over the whole
+                        sentence as single characters.
+            "bits8"      - sentence is chunked into 8-character groups
+                        before merges are applied.
+            "whitespace" - sentence is split on whitespace; merges are
+                        applied to each word independently (never
+                        across a word boundary), and the resulting
+                        token lists are concatenated.
+        """
+        if pretokenize == "bits8":
+            tokens = [sentence[i:i + 8] for i in range(0, len(sentence), 8)]
+            return self._apply_merges_to_tokens(tokens)
+    
+        if pretokenize == "whitespace":
+            result = []
+            for word in sentence.split():
+                result.extend(self._apply_merges_to_tokens(list(word)+['</w>']))
+            return result
+    
+        # "char"
+        tokens = list(sentence)
+        return self._apply_merges_to_tokens(tokens)
+
 
     def encode(self, sentence: list) -> list:
         return [self.encoder.get(tok, self.encoder['<unk>']) for tok in sentence]
@@ -51,7 +80,7 @@ class Tokenizer:
     def decode(self, encoded_sent: list) -> list:
         return [self.decoder.get(tok, '<unk>') for tok in encoded_sent]
 
-    def train(self, dataset: list, num_merges: int):
+    def train(self, dataset: list, num_merges: int, pretokenize: str = "char"):
         """Train BPE tokenizer.
 
         Uses per-line doubly-linked lists to avoid joining into one
@@ -59,16 +88,51 @@ class Tokenizer:
         Each merge only touches positions of the affected pair — no
         full-vocabulary scan. A max-heap provides O(log K) best-pair
         lookup with lazy deletion.
+
+        pretokenize:
+            "char"       - default, same as before: each dataset line
+                        is one segment, initial tokens are single
+                        characters.
+            "bits8"      - each dataset line is one segment, but the
+                        initial tokens are consecutive 8-character
+                        (bit) groups instead of single bits. Use for
+                        ciphertext.
+            "whitespace" - each dataset line is split on whitespace;
+                        every word becomes its OWN independent
+                        segment, so merges can never cross a word
+                        boundary. Initial tokens inside a word are
+                        still single characters. Use for plaintext.
         """
         print("Initialising...", flush=True)
 
-        # ---- Build per-line data structures ----
-        # Each line gets its own tokens list + linked list arrays.
+        # ---- Pretokenize lines into segments of initial tokens ----
+        # A "segment" is an independent linked list — merges never
+        # cross segment boundaries. That's exactly what whitespace
+        # pretokenization needs (word boundaries become segment
+        # boundaries); bits8/char just change what the initial unit
+        # *inside* a segment is, and keep one segment per line.
+        segments = []
+        for line in dataset:
+            content = line.rstrip('\n')
+            if not content:
+                segments.append([])
+                continue
+            if pretokenize == "bits8":
+                segments.append(
+                    [content[i:i + 8] for i in range(0, len(content), 8)]
+                )
+            elif pretokenize == "whitespace":
+                for word in content.split():
+                    segments.append(list(word)+['</w>'])
+            else:  # "char"
+                segments.append(list(content))
+
+        num_lines = len(segments)
+
+        # ---- Build per-segment data structures ----
+        # Each segment gets its own tokens list + linked list arrays.
         # We track (line_idx, position) tuples in pair_positions.
 
-        num_lines = len(dataset)
-
-        # Per-line storage
         all_tokens = []     # all_tokens[line_idx] = list of current tokens
         all_next = []       # all_next[line_idx] = list of next-pointers
         all_prev = []       # all_prev[line_idx] = list of prev-pointers
@@ -79,32 +143,29 @@ class Tokenizer:
 
         vocab = set()
 
-        for li, line in enumerate(dataset):
-            # Strip trailing newline for content
-            content = line.rstrip('\n')
-            clen = len(content)
+        for li, tokens in enumerate(segments):
+            clen = len(tokens)
             if clen == 0:
                 all_tokens.append([])
                 all_next.append([])
                 all_prev.append([])
                 continue
 
-            tokens = list(content)
             all_tokens.append(tokens)
 
-            # Build linked list for this line
+            # Build linked list for this segment
             nxt = list(range(1, clen)) + [-1]  # next[i] = i+1, last = -1
             prv = [-1] + list(range(0, clen - 1))  # prev[i] = i-1, first = -1
             all_next.append(nxt)
             all_prev.append(prv)
 
             # Collect vocab
-            for c in content:
-                vocab.add(c)
+            for tok in tokens:
+                vocab.add(tok)
 
             # Collect pair positions
             for j in range(clen - 1):
-                pair_pos_lists[(content[j], content[j + 1])].append((li, j))
+                pair_pos_lists[(tokens[j], tokens[j + 1])].append((li, j))
 
         # Convert to sets and count
         pair_positions = {}
@@ -118,15 +179,17 @@ class Tokenizer:
         heap = [(-c, p) for p, c in pair_count.items()]
         heapq.heapify(heap)
 
-        print(f"Init done. {num_lines} lines, "
-              f"unique pairs={len(pair_count)}.  "
-              f"Starting {num_merges} merges...", flush=True)
+        print(f"Init done. {num_lines} segments, "
+            f"unique pairs={len(pair_count)}.  "
+            f"Starting {num_merges} merges...", flush=True)
 
-        # ---- Merge loop ----
+        # ---- Merge loop (UNCHANGED — operates generically on tokens,
+        # so it doesn't care whether they started as single chars,
+        # 8-bit groups, or word-scoped chars) ----
         _heappush = heapq.heappush  # local ref for speed
 
         for merge_i in range(num_merges):
-            if (merge_i + 1) % 1 == 0:
+            if (merge_i + 1) % 1000 == 0:
                 print(f"  merge {merge_i + 1}/{num_merges}", flush=True)
 
             # Find best pair via heap with lazy deletion
@@ -245,20 +308,48 @@ class Tokenizer:
         self.merge = [tuple(pair) for pair in data["merge"]]
         self.decoder = {v:k for k,v in self.encoder.items()}
 
+class Dataloader:
+    def __init__():
+        pass
+
+
+
+def prep_data(tokpath, datapath, outpath, type="char"):
+    tokenizer = Tokenizer()
+    tokenizer.load(tokpath)
+    with open(datapath, "r") as data_file:
+        data = data_file.readlines()
+
+    tokenized_data = []
+    i=0
+    for sentence in data:
+        tok_sent = tokenizer.apply_merges(sentence, type)
+        tok_sent = tokenizer.encode(tok_sent)
+        tokenized_data.append(tok_sent)
+        i+=1
+        if i%100==0:
+            print(f"{i} sentences completed")
+
+    with open(outpath, "wb") as out_file:
+        pickle.dump(tokenized_data, out_file)
+
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--merges", type=int, required=True)
     parser.add_argument("--dataset", required=True)
+    parser.add_argument("--pretok", required=True)
 
     args = parser.parse_args()
 
     num_merges = args.merges
     dataset = args.dataset
+    pretok = args.pretok
 
     datapath = IN_DIR+dataset
-    outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+'.json'
+    outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+f'_{pretok}'+'.json'
 
     with open(datapath,"r") as file:
         data = file.readlines()
@@ -268,5 +359,9 @@ if __name__ == "__main__":
     if Path(outpath).exists():
         tokenizer.load(outpath)
     else:
-        tokenizer.train(data, num_merges)
+        tokenizer.train(data, num_merges, pretokenize=pretok)
         tokenizer.save(outpath)
+
+    print("Tokenizing the dataset...")
+    tokenized_path = f"../{dataset.split('.')[0]}_tokenized.pkl"
+    prep_data(outpath, datapath, tokenized_path, type=pretok)

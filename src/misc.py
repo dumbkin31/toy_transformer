@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pickle
 
 from dataset import Tokenizer
 
@@ -48,8 +49,8 @@ def calc_tok_lengths(cipher, plain):
     ci_toks_sent = []
     pl_toks_sent = []
     for i in range(100):
-        ci_sent = ci_tok.apply_merges(ci_data[i])
-        pl_sent = pl_tok.apply_merges(pl_data[i])
+        ci_sent = ci_tok.apply_merges(ci_data[i], "bits8")
+        pl_sent = pl_tok.apply_merges(pl_data[i], "whitespace")
         tok_ratio.append(len(ci_sent)/len(pl_sent))
         ci_toks_sent.append(len(ci_sent)**(-1)/len("".join(ci_sent))**(-1))
         pl_toks_sent.append(len(pl_sent)**(-1)/len("".join(pl_sent))**(-1))
@@ -64,5 +65,13 @@ if __name__=="__main__":
     # plot_lengths(DATA_DIR+"brown_cipher.txt", DATA_DIR+"brown_plain.txt")
 
     TOK_DIR = "../tokenizer/"
-    calc_tok_lengths(TOK_DIR+"brown_cipher1000.json",TOK_DIR+"brown_plain.json")
+    # calc_tok_lengths(TOK_DIR+"brown_cipher2000_bits8.json",TOK_DIR+"brown_plain5000_whitespace.json")
+
+    with open("../brown_plain_tokenized.pkl","rb") as file:
+        data = pickle.load(file)
+
+    tok = Tokenizer()
+    tok.load(TOK_DIR+"brown_plain5000_whitespace.json")
+    for sentence in data[:3]:
+        print(tok.decode(sentence))
 
