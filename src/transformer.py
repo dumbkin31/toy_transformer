@@ -108,6 +108,7 @@ class DecoderLayer(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
+        self.rope = config.rope
         self.encoder_embedding = nn.Embedding(config.src_vocab_size, config.d_model)
         self.decoder_embedding = nn.Embedding(config.tgt_vocab_size, config.d_model)
         if not config.rope:
@@ -120,11 +121,20 @@ class Transformer(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
     def generate_mask(self, src, tgt):
-        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)
-        tgt_mask = (tgt != 0).unsqueeze(1).unsqueeze(3)
+        # Ignore padding tokens in the source (mask keys)
+        src_mask = (src != 0).unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, src_len)
+
+        # Ignore padding tokens in the target — mask KEYS, not queries
+        tgt_pad_mask = (tgt != 0).unsqueeze(1).unsqueeze(2)  # (batch, 1, 1, tgt_len)
+
+        # Prevent decoder from looking at future tokens
         seq_length = tgt.size(1)
-        nopeak_mask = (1 - torch.triu(torch.ones(1, seq_length, seq_length), diagonal=1)).bool()
-        tgt_mask = tgt_mask & nopeak_mask
+        nopeak_mask = torch.tril(
+            torch.ones(seq_length, seq_length, dtype=torch.bool, device=tgt.device)
+        )
+
+        tgt_mask = tgt_pad_mask & nopeak_mask  # broadcasts to (batch, 1, tgt_len, tgt_len)
+
         return src_mask, tgt_mask
 
     def forward(self, src, tgt):
