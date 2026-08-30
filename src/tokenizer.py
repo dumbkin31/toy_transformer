@@ -11,8 +11,11 @@ UNK = 1
 BOS = 2
 EOS = 3
 
-OUT_DIR = "../tokenizer/"
-IN_DIR = "../Dataset_A1/"
+current_file = Path(__file__).resolve()
+BASE_DIR = current_file.parent.parent
+
+OUT_DIR = BASE_DIR / "tokenizer"
+IN_DIR = BASE_DIR / "Dataset_A1"
 
 
 class Tokenizer:
@@ -312,54 +315,93 @@ class Tokenizer:
 
 
 
-def prep_data(tokpath, datapath, outpath, type="char"):
-    tokenizer = Tokenizer()
-    tokenizer.load(tokpath)
-    with open(datapath, "r") as data_file:
-        data = data_file.readlines()
+def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
+    ci_tok = Tokenizer()
+    ci_tok.load(ci_tokpath)
 
-    tokenized_data = []
+    pl_tok = Tokenizer()
+    pl_tok.load(pl_tokpath)
+    with open(ci_path, "r") as data_file:
+        ci_data = data_file.readlines()
+
+    with open(pl_path, "r") as data_file:
+        pl_data = data_file.readlines()
+
+    ci_tokenized = []
+    pl_tokenized = []
     i=0
-    for sentence in data:
-        tok_sent = tokenizer.apply_merges(sentence, type)
-        tok_sent = tokenizer.encode(tok_sent)
-        tokenized_data.append(tok_sent)
+    safe_len = 256*16
+    for i in range(len(ci_data)):
+        if len(ci_data[i])/16 > 256:
+            ci_data[i] = ci_data[i][:safe_len]
+            pl_data[i] = pl_data[i][:safe_len//8]
+
+    for sentence in ci_data:
+        tok_sent = ci_tok.apply_merges(sentence, "bits8")
+        tok_sent = ci_tok.encode(tok_sent)
+        ci_tokenized.append(tok_sent)
         i+=1
         if i%100==0:
             print(f"{i} sentences completed")
 
-    with open(outpath, "wb") as out_file:
-        pickle.dump(tokenized_data, out_file)
+    for sentence in pl_data:
+        tok_sent = pl_tok.apply_merges(sentence, "whitespace")
+        tok_sent = pl_tok.encode(tok_sent)
+        pl_tokenized.append(tok_sent)
+        i+=1
+        if i%100==0:
+            print(f"{i} sentences completed")
+    
+    with open(ci_out, "wb") as out_file:
+        pickle.dump(ci_tokenized, out_file)
+    with open(pl_out, "wb") as out_file:
+        pickle.dump(pl_tokenized, out_file)
 
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--merges", type=int, required=True)
-    parser.add_argument("--dataset", required=True)
-    parser.add_argument("--pretok", required=True)
+    # parser.add_argument("--merges", type=int, required=True)
+    # parser.add_argument("--dataset", required=True)
+    # parser.add_argument("--pretok", required=True)
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    num_merges = args.merges
-    dataset = args.dataset
-    pretok = args.pretok
+    # num_merges = args.merges
+    # dataset = args.dataset
+    # pretok = args.pretok
 
-    datapath = IN_DIR+dataset
-    outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+f'_{pretok}'+'.json'
+    # datapath = IN_DIR+dataset
+    # outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+f'_{pretok}'+'.json'
 
-    with open(datapath,"r") as file:
-        data = file.readlines()
+    # with open(datapath,"r") as file:
+    #     data = file.readlines()
 
-    tokenizer = Tokenizer()
+    # tokenizer = Tokenizer()
 
-    if Path(outpath).exists():
-        tokenizer.load(outpath)
-    else:
-        tokenizer.train(data, num_merges, pretokenize=pretok)
-        tokenizer.save(outpath)
+    # if Path(outpath).exists():
+    #     tokenizer.load(outpath)
+    # else:
+    #     tokenizer.train(data, num_merges, pretokenize=pretok)
+    #     tokenizer.save(outpath)
 
-    print("Tokenizing the dataset...")
-    tokenized_path = f"../{dataset.split('.')[0]}_tokenized.pkl"
-    prep_data(outpath, datapath, tokenized_path, type=pretok)
+    # print("Tokenizing the dataset...")
+    # tokenized_path = f"../{dataset.split('.')[0]}_tokenized.pkl"
+    # prep_data(outpath, datapath, tokenized_path, type=pretok)
+
+    pl_tokpath = OUT_DIR / "brown_plain5000_whitespace.json"
+    pl_path = IN_DIR / "brown_plain.txt"
+    pl_outpath = BASE_DIR / "brown_plain_tokenized.pkl"
+    ci_tokpath = OUT_DIR / "brown_cipher2000_bits8.json"
+    ci_path = IN_DIR / "brown_cipher.txt"
+    ci_outpath = BASE_DIR / "brown_cipher_tokenized.pkl"
+
+    prep_data(
+        ci_tokpath,
+        pl_tokpath,
+        ci_path,
+        pl_path,
+        ci_outpath,
+        pl_outpath
+    )
