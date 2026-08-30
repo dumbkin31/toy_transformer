@@ -20,6 +20,24 @@ TOK_DIR = BASE_DIR / "tokenizer"
 CIPHER_TOKENIZER = TOK_DIR / "brown_cipher2000_bits8.json"
 PLAIN_TOKENIZER = TOK_DIR / "brown_plain5000_whitespace.json"
 
+def save_checkpoint(
+    model,
+    optimizer,
+    epoch,
+    train_loss,
+    val_loss,
+    path
+):
+    checkpoint = {
+        "epoch": epoch,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+    }
+
+    torch.save(checkpoint, path)
+    print(f"Checkpoint saved to {path}")
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
@@ -119,6 +137,8 @@ def train(
         },
     )
 
+    best_val_loss = float("inf")
+
     for epoch in range(num_epochs):
 
         train_loss = train_one_epoch(
@@ -146,6 +166,18 @@ def train(
             "train_loss": train_loss,
             "val_loss": val_loss
         })
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+
+            save_checkpoint(
+                model,
+                optimizer,
+                epoch + 1,
+                train_loss,
+                val_loss,
+                "best_checkpoint.pt"
+            )
 
     run.finish()
 
@@ -218,6 +250,7 @@ if __name__=="__main__":
     train(
         model=model,
         train_loader=train_loader,
+        val_loader=val_loader,
         num_epochs=1,
         learning_rate=1e-4,
         device=device
