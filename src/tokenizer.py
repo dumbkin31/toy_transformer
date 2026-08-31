@@ -329,14 +329,22 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
 
     ci_tokenized = []
     pl_tokenized = []
-    i=0
     safe_len = 256*16
+    new_ci_data = []
+    new_pl_data = []
     for i in range(len(ci_data)):
-        if len(ci_data[i])/16 > 256:
-            ci_data[i] = ci_data[i][:safe_len]
-            pl_data[i] = pl_data[i][:safe_len//8]
+        if not len(ci_data[i])/16 > 256:
+            new_ci_data.append(ci_data[i])
+            new_pl_data.append(pl_data[i])
+            continue
+        j = 0
+        while j<len(ci_data[i]):
+            new_ci_data.append(ci_data[i][j:j+safe_len])
+            new_pl_data.append(pl_data[i][j//8:(j+safe_len)//8])
+            j+=safe_len
 
-    for sentence in ci_data:
+    i=0
+    for sentence in new_ci_data:
         tok_sent = ci_tok.apply_merges(sentence, "bits8")
         tok_sent = ci_tok.encode(tok_sent)
         ci_tokenized.append(tok_sent)
@@ -344,7 +352,7 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
         if i%100==0:
             print(f"{i} sentences completed")
 
-    for sentence in pl_data:
+    for sentence in new_pl_data:
         tok_sent = pl_tok.apply_merges(sentence, "whitespace")
         tok_sent = pl_tok.encode(tok_sent)
         pl_tokenized.append(tok_sent)
@@ -360,7 +368,7 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
 
 if __name__ == "__main__":
 
-    parser = argparse.ArgumentParser()
+    # parser = argparse.ArgumentParser()
 
     # parser.add_argument("--merges", type=int, required=True)
     # parser.add_argument("--dataset", required=True)
@@ -372,8 +380,8 @@ if __name__ == "__main__":
     # dataset = args.dataset
     # pretok = args.pretok
 
-    # datapath = IN_DIR+dataset
-    # outpath = OUT_DIR+dataset.split('.')[0]+str(num_merges)+f'_{pretok}'+'.json'
+    # datapath = IN_DIR / dataset
+    # outpath = OUT_DIR / f"{dataset.split('.')[0]}{num_merges}_{pretok}.json"
 
     # with open(datapath,"r") as file:
     #     data = file.readlines()
@@ -393,7 +401,7 @@ if __name__ == "__main__":
     pl_tokpath = OUT_DIR / "brown_plain5000_whitespace.json"
     pl_path = IN_DIR / "brown_plain.txt"
     pl_outpath = BASE_DIR / "brown_plain_tokenized.pkl"
-    ci_tokpath = OUT_DIR / "brown_cipher2000_bits8.json"
+    ci_tokpath = OUT_DIR / "brown_cipher5000_bits8.json"
     ci_path = IN_DIR / "brown_cipher.txt"
     ci_outpath = BASE_DIR / "brown_cipher_tokenized.pkl"
 

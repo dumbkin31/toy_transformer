@@ -46,14 +46,17 @@ def calc_tok_lengths(cipher, plain):
         pl_data = sorted(pl_file.readlines(), key=lambda x: -len(x))[:100]
 
     tok_ratio = []
+    ci_tok_len = []
     ci_toks_sent = []
     pl_toks_sent = []
-    for i in range(100):
+    for i in range(10):
         ci_sent = ci_tok.apply_merges(ci_data[i], "bits8")
         pl_sent = pl_tok.apply_merges(pl_data[i], "whitespace")
+        ci_tok_len.append(len(ci_sent))
         tok_ratio.append(len(ci_sent)/len(pl_sent))
         ci_toks_sent.append(len(ci_sent)**(-1)/len("".join(ci_sent))**(-1))
         pl_toks_sent.append(len(pl_sent)**(-1)/len("".join(pl_sent))**(-1))
+    print(ci_tok_len)
     print(tok_ratio)
     print(ci_toks_sent)
     print(pl_toks_sent)
@@ -65,7 +68,7 @@ if __name__=="__main__":
     # plot_lengths(DATA_DIR+"brown_cipher.txt", DATA_DIR+"brown_plain.txt")
 
     # TOK_DIR = "../tokenizer/"
-    # calc_tok_lengths(TOK_DIR+"brown_cipher2000_bits8.json",TOK_DIR+"brown_plain5000_whitespace.json")
+    # calc_tok_lengths(TOK_DIR+"brown_cipher5000_bits8.json",TOK_DIR+"brown_plain5000_whitespace.json")
 
     # with open("../brown_plain_tokenized.pkl","rb") as file:
     #     data = pickle.load(file)
@@ -79,5 +82,5 @@ if __name__=="__main__":
         data = pickle.load(file)
 
     data = sorted(data, key=lambda x: -len(x))
-    print(len(data[0]))
+    print(len(data[3]))
 

@@ -495,7 +495,7 @@ def main():
     parser.add_argument(
         "--max_seq_len",
         type=int,
-        default=350
+        default=352
     )
 
     parser.add_argument(
