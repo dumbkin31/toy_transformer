@@ -132,7 +132,7 @@ def train(
         if amp_enabled and torch.cuda.is_bf16_supported()
         else torch.float16
     )
-    scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled and amp_dtype == torch.float16)
+    scaler = torch.amp.GradScaler(enabled=amp_enabled and amp_dtype == torch.float16)
 
     best_val_loss = float("inf")
 
@@ -190,7 +190,7 @@ if __name__=="__main__":
     parser.add_argument("--d_ff", type=int, required=True)
     parser.add_argument("--num_heads", type=int, required=True)
     parser.add_argument("--num_layers", type=int, required=True)
-    parser.add_argument("--rope", type=bool, required=True)
+    parser.add_argument("--rope", type=int, required=True)
     parser.add_argument("--attention", type=str, required=True)
     parser.add_argument("--normalization", type=str, required=True)
     parser.add_argument("--epochs", type=int, required=True)

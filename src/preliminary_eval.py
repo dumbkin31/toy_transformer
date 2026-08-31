@@ -471,37 +471,37 @@ def main():
     parser.add_argument(
         "--d_model",
         type=int,
-        default=128
+        default=256
     )
 
     parser.add_argument(
         "--d_ff",
         type=int,
-        default=512
+        default=1024
     )
 
     parser.add_argument(
         "--num_heads",
         type=int,
-        default=4
+        default=8
     )
 
     parser.add_argument(
         "--num_layers",
         type=int,
-        default=4
+        default=6
     )
 
     parser.add_argument(
         "--max_seq_len",
         type=int,
-        default=3000
+        default=350
     )
 
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=8
+        default=64
     )
 
     parser.add_argument(
