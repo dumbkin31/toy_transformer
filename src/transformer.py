@@ -11,7 +11,7 @@ class TransformerConfig:
             self, 
             d_model=128, 
             d_ff=512, 
-            max_seq_len=350, 
+            max_seq_len=352, 
             num_heads=4, 
             num_layers=2,
             rope=False, 

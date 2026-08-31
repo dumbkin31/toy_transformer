@@ -79,5 +79,5 @@ if __name__=="__main__":
         data = pickle.load(file)
 
     data = sorted(data, key=lambda x: -len(x))
-    print(len(data[1]))
+    print(len(data[0]))
 

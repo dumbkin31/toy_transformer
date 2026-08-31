@@ -14,8 +14,11 @@ class CustomDataset(Dataset):
     def __init__(self, src, tgt):
         assert len(src) == len(tgt)
 
-        self.src = src
-        self.tgt = tgt
+        filtered = [
+            (s, t) for s, t in zip(src, tgt)
+            if len(s) <= 352 and len(t) <= 352
+        ]
+        self.src, self.tgt = zip(*filtered) if filtered else ([], [])
 
     def __len__(self):
         return len(self.src)
@@ -23,6 +26,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, key):
         x = [BOS]+self.src[key]+[EOS]
         y = [BOS]+self.tgt[key]+[EOS]
+        
         return x,y
 
 def collate_fn(batch):
