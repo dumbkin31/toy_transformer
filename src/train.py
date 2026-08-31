@@ -18,7 +18,7 @@ BASE_DIR = current_file.parent.parent
 SRC_PATH = BASE_DIR / "brown_cipher_tokenized.pkl"
 TGT_PATH = BASE_DIR / "brown_plain_tokenized.pkl"
 TOK_DIR = BASE_DIR / "tokenizer"
-CIPHER_TOKENIZER = TOK_DIR / "brown_cipher2000_bits8.json"
+CIPHER_TOKENIZER = TOK_DIR / "brown_cipher5000_bits8.json"
 PLAIN_TOKENIZER = TOK_DIR / "brown_plain5000_whitespace.json"
 
 def save_checkpoint(
