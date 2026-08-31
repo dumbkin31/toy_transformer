@@ -99,6 +99,7 @@ def train(
     val_loader,
     num_epochs,
     learning_rate,
+    weight_decay,
     device,
     arch = "C1"
 ):
@@ -107,9 +108,10 @@ def train(
     # Ignore padding tokens when calculating loss
     criterion = nn.CrossEntropyLoss(ignore_index=0)
 
-    optimizer = optim.Adam(
+    optimizer = optim.AdamW(
         model.parameters(),
-        lr=learning_rate
+        lr=learning_rate,
+        weight_decay=weight_decay
     )
 
     run = wandb.init(
@@ -195,6 +197,8 @@ if __name__=="__main__":
     parser.add_argument("--normalization", type=str, required=True)
     parser.add_argument("--epochs", type=int, required=True)
     parser.add_argument("--batch_size", type=int, required=True)
+    parser.add_argument("--weight_decay", type=float, required=True)
+    parser.add_argument("--lr", type=float, required=True)
 
     args = parser.parse_args()
 
@@ -269,7 +273,8 @@ if __name__=="__main__":
         train_loader=train_loader,
         val_loader=val_loader,
         num_epochs=args.epochs,
-        learning_rate=1e-4,
+        learning_rate=args.lr,
+        weight_decay=args.weight_decay,
         device=device
     )
 

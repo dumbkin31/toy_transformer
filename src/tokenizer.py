@@ -330,21 +330,15 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
     ci_tokenized = []
     pl_tokenized = []
     safe_len = 256*16
-    new_ci_data = []
-    new_pl_data = []
     for i in range(len(ci_data)):
-        if not len(ci_data[i])/16 > 256:
-            new_ci_data.append(ci_data[i])
-            new_pl_data.append(pl_data[i])
-            continue
-        j = 0
-        while j<len(ci_data[i]):
-            new_ci_data.append(ci_data[i][j:j+safe_len])
-            new_pl_data.append(pl_data[i][j//8:(j+safe_len)//8])
-            j+=safe_len
-
+        ci_data[i] = ci_data[i].rstrip()
+        pl_data[i] = pl_data[i].rstrip()
+        if len(ci_data[i]) > safe_len:
+            ci_data[i] = ci_data[i][0:safe_len]
+            pl_data[i] = pl_data[i][0:safe_len//8]
+        
     i=0
-    for sentence in new_ci_data:
+    for sentence in ci_data:
         tok_sent = ci_tok.apply_merges(sentence, "bits8")
         tok_sent = ci_tok.encode(tok_sent)
         ci_tokenized.append(tok_sent)
@@ -352,7 +346,7 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
         if i%100==0:
             print(f"{i} sentences completed")
 
-    for sentence in new_pl_data:
+    for sentence in pl_data:
         tok_sent = pl_tok.apply_merges(sentence, "whitespace")
         tok_sent = pl_tok.encode(tok_sent)
         pl_tokenized.append(tok_sent)

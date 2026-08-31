@@ -31,7 +31,7 @@ import pickle
 from pathlib import Path
 
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, random_split
 
 # Standard metric libraries
 try:
@@ -538,15 +538,20 @@ def main():
     # This preliminary script uses the LAST 10% as a test set.
     # For your final experiment, use the exact saved/random split
     # used during training so evaluation uses the same test examples.
-    test_size = int(0.1 * len(dataset))
-
-    test_dataset = Subset(
+    dataset = CustomDataset(src_data, tgt_data)
+    
+    train_size = int(0.8 * len(dataset))
+    val_size = int(0.1 * len(dataset))
+    test_size = len(dataset) - train_size - val_size
+    
+    train_dataset, val_dataset, test_dataset = random_split(
         dataset,
-        range(len(dataset) - test_size, len(dataset))
+        [train_size, val_size, test_size],
+        generator=torch.Generator().manual_seed(42)
     )
 
     test_loader = DataLoader(
-        test_dataset,
+        train_dataset,
         batch_size=args.batch_size,
         shuffle=False,
         collate_fn=collate_fn
@@ -642,7 +647,7 @@ def main():
 
     print("\n===== EXAMPLES =====")
 
-    for i in range(min(5, len(results["predictions"]))):
+    for i in range(min(10, len(results["predictions"]))):
 
         pred = tokens_to_text(
             results["predictions"][i]

@@ -16,7 +16,7 @@ class CustomDataset(Dataset):
 
         filtered = [
             (s, t) for s, t in zip(src, tgt)
-            if len(s) <= 352 and len(t) <= 352
+            if len(s)+2 <= 352 and len(t)+2 <= 352
         ]
         self.src, self.tgt = zip(*filtered) if filtered else ([], [])
 
