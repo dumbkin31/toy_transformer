@@ -117,6 +117,13 @@ class Transformer(nn.Module):
         self.encoder_layers = nn.ModuleList([EncoderLayer(config) for _ in range(config.num_layers)])
         self.decoder_layers = nn.ModuleList([DecoderLayer(config) for _ in range(config.num_layers)])
 
+        if config.layernorm == "rms":
+            self.enc_norm = RMSNorm(config.d_model)
+            self.dec_norm = RMSNorm(config.d_model)
+        else:
+            self.enc_norm = LayerNorm(config.d_model)
+            self.dec_norm = LayerNorm(config.d_model)
+
         self.fc = nn.Linear(config.d_model, config.tgt_vocab_size)
         self.dropout = nn.Dropout(config.dropout)
 
@@ -152,10 +159,12 @@ class Transformer(nn.Module):
         enc_output = src_embedded
         for enc_layer in self.encoder_layers:
             enc_output = enc_layer(enc_output, src_mask)
+        enc_output = self.enc_norm(enc_output)
 
         dec_output = tgt_embedded
         for dec_layer in self.decoder_layers:
             dec_output = dec_layer(dec_output, enc_output, src_mask, tgt_mask)
+        dec_output = self.dec_norm(dec_output)
 
         output = self.fc(dec_output)
         return output
