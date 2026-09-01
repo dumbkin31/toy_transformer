@@ -109,8 +109,11 @@ class Transformer(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.rope = config.rope
-        self.encoder_embedding = nn.Embedding(config.src_vocab_size, config.d_model)
-        self.decoder_embedding = nn.Embedding(config.tgt_vocab_size, config.d_model)
+        self.d_model = config.d_model
+        
+        # Adding padding_idx=0 ensures the padding token vector is all zeros and not updated during training
+        self.encoder_embedding = nn.Embedding(config.src_vocab_size, config.d_model, padding_idx=0)
+        self.decoder_embedding = nn.Embedding(config.tgt_vocab_size, config.d_model, padding_idx=0)
         if not config.rope:
             self.positional_encoding = PositionalEncoding(config.d_model, config.max_seq_len)
 
