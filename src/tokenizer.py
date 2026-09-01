@@ -330,15 +330,51 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
     ci_tokenized = []
     pl_tokenized = []
     safe_len = 256*16
+    new_ci_data = []
+    new_pl_data = []
     for i in range(len(ci_data)):
         ci_data[i] = ci_data[i].rstrip()
         pl_data[i] = pl_data[i].rstrip()
-        if len(ci_data[i]) > safe_len:
-            ci_data[i] = ci_data[i][0:safe_len]
-            pl_data[i] = pl_data[i][0:safe_len//8]
-        
+        if len(ci_data[i]) < safe_len:
+            new_ci_data.append(ci_data[i])
+            new_pl_data.append(pl_data[i])
+            continue
+
+        # j=0
+        # while j<len(ci_data[i]):
+        #     new_ci_data.append(ci_data[i][j:j+safe_len])
+        #     new_pl_data.append(pl_data[i][j//8:(j+safe_len)//8])
+        #     if len(new_pl_data[-1])<10:
+        #         new_pl_data.pop()
+        #         new_ci_data.pop()
+        #     j+=safe_len
+
+        words = pl_data[i].split()
+        segment_len = 0
+        segment = []
+        ciph_idx = 0
+        for word in words:
+            segment.append(word)
+            segment_len+=len(word)+1
+            if segment_len>safe_len:
+                segment = " ".join(segment)
+                segment_len = len(segment)+1
+                new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
+                new_pl_data.append(segment)
+                ciph_idx+=segment_len*8
+                segment = []
+                segment_len = 0
+
+        segment = " ".join(segment)
+        segment_len = len(segment)
+        if segment_len:
+            new_pl_data.append(segment)
+            new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
+
+    # print(new_ci_data)
+    # print(new_pl_data) 
     i=0
-    for sentence in ci_data:
+    for sentence in new_ci_data:
         tok_sent = ci_tok.apply_merges(sentence, "bits8")
         tok_sent = ci_tok.encode(tok_sent)
         ci_tokenized.append(tok_sent)
@@ -346,14 +382,14 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
         if i%100==0:
             print(f"{i} sentences completed")
 
-    for sentence in pl_data:
+    for sentence in new_pl_data:
         tok_sent = pl_tok.apply_merges(sentence, "whitespace")
         tok_sent = pl_tok.encode(tok_sent)
         pl_tokenized.append(tok_sent)
         i+=1
         if i%100==0:
             print(f"{i} sentences completed")
-    
+
     with open(ci_out, "wb") as out_file:
         pickle.dump(ci_tokenized, out_file)
     with open(pl_out, "wb") as out_file:
