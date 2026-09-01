@@ -18,12 +18,12 @@ def plot_helper(x, y, xl, yl, title, fname):
     plt.savefig(PLOTS_DIR+fname)
     plt.show()
 
-def plot_lengths(cipher, plain):
-    with open(cipher,"r") as ci_file:
-        ci_data = ci_file.readlines()
+def plot_lengths(ci_data, pl_data):
+    # with open(cipher,"r") as ci_file:
+    #     ci_data = ci_file.readlines()
 
-    with open(plain,"r") as pl_file:
-        pl_data = pl_file.readlines()
+    # with open(plain,"r") as pl_file:
+    #     pl_data = pl_file.readlines()
 
     ci_len = []
     pl_len = []
@@ -34,7 +34,7 @@ def plot_lengths(cipher, plain):
         ratio.append(ci_len[-1]/pl_len[-1])
 
     plot_helper(ci_len, pl_len, "cipher", "plain", "len vs len", "lengths.png")
-    plot_helper(range(1,5001), ratio, "id", "ratio", "ratio", "ratio.png")
+    plot_helper(range(1,ci_len+1), ratio, "id", "ratio", "ratio", "ratio.png")
 
 def calc_tok_lengths(cipher, plain):
     ci_tok = Tokenizer(); pl_tok = Tokenizer()

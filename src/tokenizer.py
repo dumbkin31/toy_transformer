@@ -356,7 +356,7 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
         for word in words:
             segment.append(word)
             segment_len+=len(word)+1
-            if segment_len>safe_len:
+            if segment_len>safe_len//8:
                 segment = " ".join(segment)
                 segment_len = len(segment)+1
                 new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
