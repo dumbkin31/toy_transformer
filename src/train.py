@@ -2,10 +2,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader, random_split
+from torch.optim.lr_scheduler import LambdaLR
 
 import wandb
 import pickle
 import argparse
+import math
 
 from pathlib import Path
 from transformer import Transformer, TransformerConfig
@@ -40,7 +42,7 @@ def save_checkpoint(
     torch.save(checkpoint, path)
     print(f"Checkpoint saved to {path}")
 
-def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler, amp_enabled, amp_dtype):
+def train_one_epoch(model, dataloader, optimizer, scheduler, criterion, device, scaler, amp_enabled, amp_dtype):
     model.train()
 
     total_loss = 0.0
@@ -62,8 +64,16 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, scaler, amp
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)                     # needed before clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
+        # Save scale before we step the scaler
+        scale_before = scaler.get_scale()
         scaler.step(optimizer)
         scaler.update()
+        
+        # If the scale wasn't reduced, the optimizer successfully stepped
+        # (It didn't skip due to inf/nan gradients in AMP)
+        if scale_before <= scaler.get_scale():
+            scheduler.step()
 
         total_loss += loss.item()
 
@@ -105,6 +115,15 @@ def train(
 ):
     model = model.to(device)
 
+    total_steps = len(train_loader) * num_epochs
+    warmup_steps = 500  # tune if needed, but this is a fine default
+
+    def lr_lambda(step):
+        if step < warmup_steps:
+            return (step + 1) / warmup_steps
+        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
+        return 0.5 * (1 + math.cos(math.pi * progress))
+
     # Ignore padding tokens when calculating loss
     criterion = nn.CrossEntropyLoss(ignore_index=0)
 
@@ -113,6 +132,7 @@ def train(
         lr=learning_rate,
         weight_decay=weight_decay
     )
+    scheduler = LambdaLR(optimizer, lr_lambda)
 
     run = wandb.init(
         # Set the wandb entity where your project will be logged (generally your team name).
@@ -144,6 +164,7 @@ def train(
             model,
             train_loader,
             optimizer,
+            scheduler,
             criterion,
             device,
             scaler,
@@ -182,6 +203,15 @@ def train(
                 val_loss,
                 "best_checkpoint.pt"
             )
+
+    save_checkpoint(
+        model,
+        optimizer,
+        epoch+1,
+        train_loss,
+        val_loss,
+        "final_checkpoint.pt"
+    )
 
     run.finish()
 

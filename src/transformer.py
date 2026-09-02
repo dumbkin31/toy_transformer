@@ -50,7 +50,7 @@ class EncoderLayer(nn.Module):
             self.norm1 = LayerNorm(self.d_model)
             self.norm2 = LayerNorm(self.d_model)
 
-        self.ffn = PositionWiseFeedForward(self.d_model, config.d_ff, config.dropout)
+        self.ffn = PositionWiseFeedForward(self.d_model, config.d_ff)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x, mask):
@@ -84,7 +84,7 @@ class DecoderLayer(nn.Module):
             self.norm2 = LayerNorm(self.d_model)
             self.norm3 = LayerNorm(self.d_model)
 
-        self.ffn = PositionWiseFeedForward(self.d_model, config.d_ff, config.dropout)
+        self.ffn = PositionWiseFeedForward(self.d_model, config.d_ff)
         self.dropout = nn.Dropout(config.dropout)
     
     def forward(self, x, enc_output, src_mask, tgt_mask):
