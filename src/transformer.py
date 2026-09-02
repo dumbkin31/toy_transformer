@@ -19,7 +19,8 @@ class TransformerConfig:
             normalization="layernorm",
             dropout=0.1,
             src_vocab_size=2000,
-            tgt_vocab_size=5000
+            tgt_vocab_size=5000,
+            num_kv_heads=2
         ):
         self.d_model = d_model
         self.d_ff = d_ff
@@ -32,6 +33,7 @@ class TransformerConfig:
         self.attention = attention
         self.layernorm = normalization
         self.dropout = dropout
+        self.num_kv_heads = num_kv_heads
 
 class EncoderLayer(nn.Module):
     def __init__(self, config):
@@ -39,9 +41,9 @@ class EncoderLayer(nn.Module):
         self.d_model = config.d_model
         self.rope = config.rope
         if config.attention == "gqa":
-            self.attention = GroupedQueryAttention(self.d_model, config.num_heads)
+            self.attention = GroupedQueryAttention(self.d_model, config.num_heads, config.num_kv_heads, config.rope, config.max_seq_len)
         else:
-            self.attention = MultiHeadAttention(self.d_model, config.num_heads)
+            self.attention = MultiHeadAttention(self.d_model, config.num_heads, config.rope, config.max_seq_len)
 
         if config.layernorm == "rms":
             self.norm1 = RMSNorm(self.d_model)
@@ -55,7 +57,7 @@ class EncoderLayer(nn.Module):
 
     def forward(self, x, mask):
         norm_x = self.norm1(x)
-        attn_output = self.attention(norm_x, norm_x, norm_x, mask, self.rope)
+        attn_output = self.attention(norm_x, norm_x, norm_x, mask)
         x = x + self.dropout(attn_output)
 
         norm_x = self.norm2(x)
@@ -69,11 +71,11 @@ class DecoderLayer(nn.Module):
         self.d_model = config.d_model
         self.rope = config.rope
         if config.attention == "gqa":
-            self.self_attn = GroupedQueryAttention(self.d_model, config.num_heads)
-            self.cross_attn = GroupedQueryAttention(self.d_model, config.num_heads)
+            self.self_attn = GroupedQueryAttention(self.d_model, config.num_heads, config.num_kv_heads, config.rope, config.max_seq_len)
+            self.cross_attn = GroupedQueryAttention(self.d_model, config.num_heads, config.num_kv_heads, False, config.max_seq_len)
         else:
-            self.self_attn = MultiHeadAttention(self.d_model, config.num_heads)
-            self.cross_attn = MultiHeadAttention(self.d_model, config.num_heads)
+            self.self_attn = MultiHeadAttention(self.d_model, config.num_heads, config.rope, config.max_seq_len)
+            self.cross_attn = MultiHeadAttention(self.d_model, config.num_heads, False, config.max_seq_len)
 
         if config.layernorm == "rms":
             self.norm1 = RMSNorm(self.d_model)
@@ -90,12 +92,12 @@ class DecoderLayer(nn.Module):
     def forward(self, x, enc_output, src_mask, tgt_mask):
         # Masked self-attention
         norm_x = self.norm1(x)
-        attn_output = self.self_attn(norm_x, norm_x, norm_x, tgt_mask, self.rope)
+        attn_output = self.self_attn(norm_x, norm_x, norm_x, tgt_mask)
         x = x + self.dropout(attn_output)
 
         # Cross-attention
         norm_x = self.norm2(x)
-        attn_output = self.cross_attn(norm_x, enc_output, enc_output, src_mask, self.rope)
+        attn_output = self.cross_attn(norm_x, enc_output, enc_output, src_mask)
         x = x + self.dropout(attn_output)
 
         # Feed-forward

@@ -22,7 +22,7 @@ class ScaledDotProductAttention(nn.Module):
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model, num_heads):
+    def __init__(self, d_model, num_heads, rope=False, max_seq_len=352, base=10000.0):
         super().__init__()
         assert d_model % num_heads == 0, "d_model must be divisible by num_heads"
         
@@ -35,6 +35,14 @@ class MultiHeadAttention(nn.Module):
         self.W_v = nn.Linear(d_model, d_model)
         self.W_o = nn.Linear(d_model, d_model)
 
+        self.rope = rope
+        if rope:
+            inv_freq = 1.0 / (base ** (torch.arange(0, self.d_k, 2).float() / self.d_k))
+            t = torch.arange(max_seq_len).float()
+            freqs = torch.outer(t, inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            self.register_buffer("rope_cos", emb.cos(), persistent=False)
+            self.register_buffer("rope_sin", emb.sin(), persistent=False)
         self.scaled_dot_product_attention = ScaledDotProductAttention()
         
     def split_heads(self, x):
@@ -68,13 +76,17 @@ class MultiHeadAttention(nn.Module):
         # 3. Apply the rotation formula: (X * cos) + (rotate_half(X) * sin)
         return (x * cos) + (self.rotate_half(x) * sin)
     
-    def forward(self, x_q, x_k, x_v, mask=None, rope=False):
+    def forward(self, x_q, x_k, x_v, mask=None):
         Q = self.split_heads(self.W_q(x_q))
         K = self.split_heads(self.W_k(x_k))
         V = self.split_heads(self.W_v(x_v))
 
-        if rope:
-            pass
+        if self.rope:
+            seq_len = max(Q.size(2), K.size(2))
+            cos = self.rope_cos[:seq_len]
+            sin = self.rope_sin[:seq_len]
+            Q = self.apply_rotary_emb(Q, cos, sin)
+            K = self.apply_rotary_emb(K, cos, sin)
         
         attn_output = self.scaled_dot_product_attention(Q, K, V, mask)
         output = self.W_o(self.combine_heads(attn_output))
@@ -82,7 +94,7 @@ class MultiHeadAttention(nn.Module):
 
 
 class GroupedQueryAttention(nn.Module):
-    def __init__(self, d_model, num_heads, num_kv_heads):
+    def __init__(self, d_model, num_heads, num_kv_heads, rope=False, max_seq_len=352, base=10000.0):
         super().__init__()
 
         assert d_model % num_heads == 0
@@ -110,7 +122,63 @@ class GroupedQueryAttention(nn.Module):
 
         self.W_o = nn.Linear(d_model, d_model)
 
+        self.rope = rope
+        if rope:
+            inv_freq = 1.0 / (base ** (torch.arange(0, self.d_k, 2).float() / self.d_k))
+            t = torch.arange(max_seq_len).float()
+            freqs = torch.outer(t, inv_freq)
+            emb = torch.cat((freqs, freqs), dim=-1)
+            self.register_buffer("rope_cos", emb.cos(), persistent=False)
+            self.register_buffer("rope_sin", emb.sin(), persistent=False)
+
         self.scaled_dot_product_attention = ScaledDotProductAttention()
 
-    def forward(self):
-        pass
+    def split_heads(self, x, num_heads):
+        batch_size, seq_length, d_model = x.size()
+        return x.view(batch_size, seq_length, num_heads, self.d_k).transpose(1, 2)
+        
+    def combine_heads(self, x):
+        batch_size, _, seq_length, d_k = x.size()
+        return x.transpose(1, 2).contiguous().view(batch_size, seq_length, self.d_model)
+
+    def rotate_half(self, x):
+        """Splits the last dimension in half and rotates it."""
+        x1 = x[..., :x.shape[-1] // 2]
+        x2 = x[..., x.shape[-1] // 2:]
+        return torch.cat((-x2, x1), dim=-1)
+
+    def apply_rotary_emb(self, x, cos, sin):
+        """
+        Applies RoPE to a tensor x of shape [batch, heads, seq_len, head_dim].
+        cos, sin shape: [seq_len, head_dim]
+        """
+        # 1. Align cos/sin dimensions to match x: [1, 1, seq_len, head_dim]
+        cos = cos.unsqueeze(0).unsqueeze(1)
+        sin = sin.unsqueeze(0).unsqueeze(1)
+        
+        # 2. Slice cos/sin to match the exact sequence length of x (handles causal/cross attention)
+        seq_len = x.shape[2]
+        cos = cos[:, :, :seq_len, :]
+        sin = sin[:, :, :seq_len, :]
+        
+        # 3. Apply the rotation formula: (X * cos) + (rotate_half(X) * sin)
+        return (x * cos) + (self.rotate_half(x) * sin)
+
+    def forward(self, x_q, x_k, x_v, mask=None):
+        Q = self.split_heads(self.W_q(x_q), self.num_heads)
+        K = self.split_heads(self.W_k(x_k), self.num_kv_heads)
+        V = self.split_heads(self.W_v(x_v), self.num_kv_heads)
+        
+        if self.rope:
+            seq_len = max(Q.size(2), K.size(2))
+            cos = self.rope_cos[:seq_len]
+            sin = self.rope_sin[:seq_len]
+            Q = self.apply_rotary_emb(Q, cos, sin)
+            K = self.apply_rotary_emb(K, cos, sin)
+
+        K = K.repeat_interleave(self.num_groups, dim=1)
+        V = V.repeat_interleave(self.num_groups, dim=1)
+            
+        attn_output = self.scaled_dot_product_attention(Q, K, V, mask)
+        output = self.W_o(self.combine_heads(attn_output))
+        return output

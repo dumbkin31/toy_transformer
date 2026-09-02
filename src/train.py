@@ -119,10 +119,7 @@ def train(
     warmup_steps = 500  # tune if needed, but this is a fine default
 
     def lr_lambda(step):
-        if step < warmup_steps:
-            return (step + 1) / warmup_steps
-        progress = (step - warmup_steps) / max(1, total_steps - warmup_steps)
-        return 0.5 * (1 + math.cos(math.pi * progress))
+        return min((step + 1) / warmup_steps, 1.0)
 
     # Ignore padding tokens when calculating loss
     criterion = nn.CrossEntropyLoss(ignore_index=0)
@@ -285,7 +282,7 @@ if __name__=="__main__":
     config = TransformerConfig(
         d_model=args.d_model,
         d_ff=args.d_ff,
-        max_seq_len=352,
+        max_seq_len=256,
         num_heads=args.num_heads,
         num_layers=args.num_layers,
         rope=args.rope,

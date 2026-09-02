@@ -19,8 +19,11 @@ class LayerNorm(nn.Module):
         return self.gamma * x_normalized + self.beta
 
 class RMSNorm(nn.Module):
-    def __init__(self):
-        pass
-    
-    def forward(self):
-        pass
+    def __init__(self, d_model, eps=1e-6):
+        super().__init__()
+        self.gamma = nn.Parameter(torch.ones(d_model))
+        self.eps = eps
+
+    def forward(self, x):
+        rms = torch.sqrt((x ** 2).mean(dim=-1, keepdim=True) + self.eps)
+        return self.gamma * (x / rms)
