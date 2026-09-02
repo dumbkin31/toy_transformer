@@ -358,18 +358,16 @@ def prep_data(ci_tokpath, pl_tokpath, ci_path, pl_path, ci_out, pl_out):
             segment_len+=len(word)+1
             if segment_len>safe_len//8:
                 segment = " ".join(segment)
-                segment_len = len(segment)+1
+                segment_len = len(segment)
                 new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
                 new_pl_data.append(segment)
-                ciph_idx+=segment_len*8
-                segment = []
-                segment_len = 0
+                break
 
-        segment = " ".join(segment)
-        segment_len = len(segment)
-        if segment_len:
-            new_pl_data.append(segment)
-            new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
+        # segment = " ".join(segment)
+        # segment_len = len(segment)
+        # if segment_len:
+        #     new_pl_data.append(segment)
+        #     new_ci_data.append(ci_data[i][ciph_idx:ciph_idx+segment_len*8])
 
     # print(new_ci_data)
     # print(new_pl_data) 
